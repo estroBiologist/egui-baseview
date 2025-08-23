@@ -335,6 +335,12 @@ where
                         width: size.x.max(1.0) as f64,
                         height: size.y.max(1.0) as f64,
                     }),
+                    
+                    // SFLT flicker fix hack
+                    ViewportCommand::CursorPosition(_) => {
+                        self.egui_input.events.push(egui::Event::PointerGone);
+                    }
+
                     _ => {}
                 }
             }
