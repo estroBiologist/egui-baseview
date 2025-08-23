@@ -293,116 +293,128 @@ where
         let Some(state) = &mut self.user_state else {
             return;
         };
-
-        self.egui_input.time = Some(self.start_time.elapsed().as_secs_f64());
-        self.egui_input.screen_rect = Some(calculate_screen_rect(
-            self.physical_size,
-            self.points_per_pixel,
-        ));
-
-        self.egui_ctx.begin_pass(self.egui_input.take());
-
-        //let mut repaint_requested = false;
-        let mut queue = Queue::new(
-            &mut self.bg_color,
-            &mut self.close_requested,
-            &mut self.physical_size,
-        );
-
-        (self.user_update)(&self.egui_ctx, &mut queue, state);
-
-        if self.close_requested {
-            window.close();
-        }
-
-        // Prevent data from being allocated every frame by storing this
-        // in a member field.
-        let mut full_output = self.egui_ctx.end_pass();
-
-        let Some(viewport_output) = full_output.viewport_output.get(&self.viewport_id) else {
-            // The main window was closed by egui.
-            window.close();
-            return;
-        };
-
-        for command in viewport_output.commands.iter() {
-            match command {
-                ViewportCommand::Close => {
-                    window.close();
-                }
-                ViewportCommand::InnerSize(size) => window.resize(baseview::Size {
-                    width: size.x.max(1.0) as f64,
-                    height: size.y.max(1.0) as f64,
-                }),
-                _ => {}
-            }
-        }
-
-        let now = Instant::now();
-        let do_repaint_now = if let Some(t) = self.repaint_after {
-            now >= t || viewport_output.repaint_delay.is_zero()
-        } else {
-            viewport_output.repaint_delay.is_zero()
-        };
-
-        if do_repaint_now {
-            self.renderer.render(
-                #[cfg(feature = "opengl")]
-                window,
-                self.bg_color,
+        
+        loop {
+            self.egui_input.time = Some(self.start_time.elapsed().as_secs_f64());
+            self.egui_input.screen_rect = Some(calculate_screen_rect(
                 self.physical_size,
-                self.pixels_per_point,
-                &mut self.egui_ctx,
-                &mut full_output,
+                self.points_per_pixel,
+            ));
+
+            self.egui_ctx.begin_pass(self.egui_input.take());
+
+            //let mut repaint_requested = false;
+            let mut queue = Queue::new(
+                &mut self.bg_color,
+                &mut self.close_requested,
+                &mut self.physical_size,
             );
 
-            self.repaint_after = None;
-        } else if let Some(repaint_after) = now.checked_add(viewport_output.repaint_delay) {
-            // Schedule to repaint after the requested time has elapsed.
-            self.repaint_after = Some(repaint_after);
-        }
+            (self.user_update)(&self.egui_ctx, &mut queue, state);
 
-        for command in full_output.platform_output.commands {
-            match command {
-                egui::OutputCommand::CopyText(text) => {
-                    if let Some(clipboard_ctx) = &mut self.clipboard_ctx {
-                        if let Err(err) = clipboard_ctx.set_contents(text) {
-                            log::error!("Copy/Cut error: {}", err);
+            if self.close_requested {
+                window.close();
+            }
+
+            // Prevent data from being allocated every frame by storing this
+            // in a member field.
+            let mut full_output = self.egui_ctx.end_pass();
+
+            let Some(viewport_output) = full_output.viewport_output.get(&self.viewport_id) else {
+                // The main window was closed by egui.
+                window.close();
+                return;
+            };
+
+            for command in viewport_output.commands.iter() {
+                match command {
+                    ViewportCommand::Close => {
+                        window.close();
+                    }
+                    ViewportCommand::InnerSize(size) => window.resize(baseview::Size {
+                        width: size.x.max(1.0) as f64,
+                        height: size.y.max(1.0) as f64,
+                    }),
+                    _ => {}
+                }
+            }
+
+            let max_passes = self.egui_ctx.options(|opt| opt.max_passes.get());
+            let requested_discard = full_output.platform_output.requested_discard();
+            let discarding = requested_discard && full_output.platform_output.num_completed_passes < max_passes;
+
+            let now = Instant::now();
+            let do_repaint_now = if let Some(t) = self.repaint_after {
+                now >= t || viewport_output.repaint_delay.is_zero()
+            } else {
+                viewport_output.repaint_delay.is_zero()
+            };
+
+            if !discarding {
+                if do_repaint_now {
+                    self.renderer.render(
+                        #[cfg(feature = "opengl")]
+                        window,
+                        self.bg_color,
+                        self.physical_size,
+                        self.pixels_per_point,
+                        &mut self.egui_ctx,
+                        &mut full_output,
+                    );
+
+                    self.repaint_after = None;
+                } else if let Some(repaint_after) = now.checked_add(viewport_output.repaint_delay) {
+                    // Schedule to repaint after the requested time has elapsed.
+                    self.repaint_after = Some(repaint_after);
+                }
+            }
+
+            for command in full_output.platform_output.commands {
+                match command {
+                    egui::OutputCommand::CopyText(text) => {
+                        if let Some(clipboard_ctx) = &mut self.clipboard_ctx {
+                            if let Err(err) = clipboard_ctx.set_contents(text) {
+                                log::error!("Copy/Cut error: {}", err);
+                            }
+                        }
+                    }
+                    egui::OutputCommand::CopyImage(_) => {
+                        log::warn!("Copying images is not supported in egui_baseview.");
+                    }
+                    egui::OutputCommand::OpenUrl(open_url) => {
+                        if let Err(err) = open::that_detached(&open_url.url) {
+                            log::error!("Open error: {}", err);
                         }
                     }
                 }
-                egui::OutputCommand::CopyImage(_) => {
-                    log::warn!("Copying images is not supported in egui_baseview.");
-                }
-                egui::OutputCommand::OpenUrl(open_url) => {
-                    if let Err(err) = open::that_detached(&open_url.url) {
-                        log::error!("Open error: {}", err);
+            }
+
+            let cursor_icon =
+                crate::translate::translate_cursor_icon(full_output.platform_output.cursor_icon);
+            if self.current_cursor_icon != cursor_icon {
+                self.current_cursor_icon = cursor_icon;
+
+                // TODO: Set mouse cursor for MacOS once baseview supports it.
+                #[cfg(not(target_os = "macos"))]
+                window.set_mouse_cursor(cursor_icon);
+            }
+
+            // A temporary workaround for keyboard input not working sometimes in Windows.
+            // See https://github.com/BillyDM/egui-baseview/issues/20
+            #[cfg(feature = "windows_keyboard_workaround")]
+            {
+                #[cfg(target_os = "windows")]
+                {
+                    if !full_output.platform_output.events.is_empty()
+                        || full_output.platform_output.ime.is_some()
+                    {
+                        window.focus();
                     }
                 }
             }
-        }
-
-        let cursor_icon =
-            crate::translate::translate_cursor_icon(full_output.platform_output.cursor_icon);
-        if self.current_cursor_icon != cursor_icon {
-            self.current_cursor_icon = cursor_icon;
-
-            // TODO: Set mouse cursor for MacOS once baseview supports it.
-            #[cfg(not(target_os = "macos"))]
-            window.set_mouse_cursor(cursor_icon);
-        }
-
-        // A temporary workaround for keyboard input not working sometimes in Windows.
-        // See https://github.com/BillyDM/egui-baseview/issues/20
-        #[cfg(feature = "windows_keyboard_workaround")]
-        {
-            #[cfg(target_os = "windows")]
-            {
-                if !full_output.platform_output.events.is_empty()
-                    || full_output.platform_output.ime.is_some()
-                {
-                    window.focus();
-                }
+            
+            if !discarding {
+                break
             }
         }
     }
