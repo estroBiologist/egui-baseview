@@ -1,8 +1,7 @@
 use std::time::Instant;
 
 use baseview::{
-    Event, EventStatus, PhySize, Window, WindowHandle, WindowHandler, WindowOpenOptions,
-    WindowScalePolicy,
+    DropData, Event, EventStatus, PhySize, Window, WindowHandle, WindowHandler, WindowOpenOptions, WindowScalePolicy
 };
 use copypasta::ClipboardProvider;
 use egui::{pos2, vec2, Pos2, Rect, Rgba, ViewportCommand};
@@ -335,12 +334,6 @@ where
                         width: size.x.max(1.0) as f64,
                         height: size.y.max(1.0) as f64,
                     }),
-                    
-                    // SFLT flicker fix hack
-                    ViewportCommand::CursorPosition(_) => {
-                        self.egui_input.events.push(egui::Event::PointerGone);
-                    }
-
                     _ => {}
                 }
             }
@@ -418,31 +411,27 @@ where
                     }
                 }
             }
-            
-            if !discarding {
-                break
-            }
         }
     }
 
     fn on_event(&mut self, _window: &mut Window, event: Event) -> EventStatus {
-        match &event {
+        match event {
             baseview::Event::Mouse(event) => match event {
                 baseview::MouseEvent::CursorMoved {
                     position,
                     modifiers,
                 } => {
-                    self.update_modifiers(modifiers);
+                    self.update_modifiers(&modifiers);
 
                     let pos = pos2(position.x as f32, position.y as f32);
                     self.pointer_pos_in_points = Some(pos);
                     self.egui_input.events.push(egui::Event::PointerMoved(pos));
                 }
                 baseview::MouseEvent::ButtonPressed { button, modifiers } => {
-                    self.update_modifiers(modifiers);
+                    self.update_modifiers(&modifiers);
 
                     if let Some(pos) = self.pointer_pos_in_points {
-                        if let Some(button) = crate::translate::translate_mouse_button(*button) {
+                        if let Some(button) = crate::translate::translate_mouse_button(button) {
                             self.egui_input.events.push(egui::Event::PointerButton {
                                 pos,
                                 button,
@@ -453,10 +442,10 @@ where
                     }
                 }
                 baseview::MouseEvent::ButtonReleased { button, modifiers } => {
-                    self.update_modifiers(modifiers);
+                    self.update_modifiers(&modifiers);
 
                     if let Some(pos) = self.pointer_pos_in_points {
-                        if let Some(button) = crate::translate::translate_mouse_button(*button) {
+                        if let Some(button) = crate::translate::translate_mouse_button(button) {
                             self.egui_input.events.push(egui::Event::PointerButton {
                                 pos,
                                 button,
@@ -470,17 +459,17 @@ where
                     delta: scroll_delta,
                     modifiers,
                 } => {
-                    self.update_modifiers(modifiers);
+                    self.update_modifiers(&modifiers);
 
                     #[allow(unused_mut)]
                     let (unit, mut delta) = match scroll_delta {
                         baseview::ScrollDelta::Lines { x, y } => {
-                            (egui::MouseWheelUnit::Line, egui::vec2(*x, *y))
+                            (egui::MouseWheelUnit::Line, egui::vec2(x, y))
                         }
 
                         baseview::ScrollDelta::Pixels { x, y } => (
                             egui::MouseWheelUnit::Point,
-                            egui::vec2(*x, *y) * self.points_per_pixel,
+                            egui::vec2(x, y) * self.points_per_pixel,
                         ),
                     };
 
@@ -501,6 +490,19 @@ where
                 baseview::MouseEvent::CursorLeft => {
                     self.pointer_pos_in_points = None;
                     self.egui_input.events.push(egui::Event::PointerGone);
+                }
+                baseview::MouseEvent::DragDropped { position: _, modifiers, data: DropData::Files(files) } => {
+                    self.update_modifiers(&modifiers);
+                    
+                    for file in files {
+                        self.egui_input.dropped_files.push(egui::DroppedFile {
+                            path: Some(file),
+                            name: String::new(),
+                            mime: String::new(),
+                            last_modified: None,
+                            bytes: None,
+                        });
+                    }
                 }
                 _ => {}
             },
