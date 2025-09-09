@@ -411,7 +411,7 @@ where
                     }
                 }
             }
-            
+
             if !discarding {
                 break
             }
@@ -495,6 +495,16 @@ where
                     self.pointer_pos_in_points = None;
                     self.egui_input.events.push(egui::Event::PointerGone);
                 }
+                baseview::MouseEvent::DragEntered { position: _, modifiers, data: _ } => {
+                    self.update_modifiers(&modifiers);
+
+                    return EventStatus::AcceptDrop(baseview::DropEffect::Link);
+                }
+                baseview::MouseEvent::DragMoved { position: _, modifiers, data: _ } => {
+                    self.update_modifiers(&modifiers);
+
+                    return EventStatus::AcceptDrop(baseview::DropEffect::Link);
+                }
                 baseview::MouseEvent::DragDropped { position: _, modifiers, data: DropData::Files(files) } => {
                     self.update_modifiers(&modifiers);
 
@@ -507,6 +517,8 @@ where
                             bytes: None,
                         });
                     }
+
+                    return EventStatus::AcceptDrop(baseview::DropEffect::Link);
                 }
                 _ => {}
             },
