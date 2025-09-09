@@ -411,6 +411,10 @@ where
                     }
                 }
             }
+            
+            if !discarding {
+                break
+            }
         }
     }
 
@@ -493,7 +497,7 @@ where
                 }
                 baseview::MouseEvent::DragDropped { position: _, modifiers, data: DropData::Files(files) } => {
                     self.update_modifiers(&modifiers);
-                    
+
                     for file in files {
                         self.egui_input.dropped_files.push(egui::DroppedFile {
                             path: Some(file),
