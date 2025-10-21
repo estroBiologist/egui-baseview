@@ -412,6 +412,19 @@ where
                 }
             }
 
+            #[cfg(target_os = "windows")]
+            {
+                if self.egui_ctx.memory(|mem| mem.focused().is_some()) {
+                    if !window.has_focus() {
+                        window.focus();
+                    }
+                } else {
+                    if window.has_focus() {
+                        window.defocus();
+                    }
+                }
+            }
+
             if !discarding {
                 break
             }
